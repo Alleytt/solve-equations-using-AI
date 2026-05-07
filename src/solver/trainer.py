@@ -24,7 +24,8 @@ except ImportError:
 import src.utils.data_generator as data_gen_module
 data_gen_module._param_cache.clear()
 
-def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=100, max_iter=5000, update_T=500):
+def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=100, max_iter=5000, update_T=500, 
+                 lambda_type='dynamic', fixed_lambda=1.0, verbose=False):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"使用设备: {device}")
 
@@ -136,6 +137,9 @@ def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=
 
     avg_data_loss = None
     avg_consist_loss = None
+    
+    train_losses = []
+    test_errors = []
 
     for it in range(max_iter):
         model.train()
@@ -161,13 +165,16 @@ def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=
                 residual = torch.bmm(H_p, pred) - I
                 consist_loss = torch.norm(residual, p='fro')**2 / (n*n)
 
-            if avg_data_loss is None:
-                avg_data_loss = data_loss.item()
-                avg_consist_loss = consist_loss.item()
+            if lambda_type == 'dynamic':
+                if avg_data_loss is None:
+                    avg_data_loss = data_loss.item()
+                    avg_consist_loss = consist_loss.item()
+                else:
+                    avg_data_loss = 0.9 * avg_data_loss + 0.1 * data_loss.item()
+                    avg_consist_loss = 0.9 * avg_consist_loss + 0.1 * consist_loss.item()
+                lambda_consist = avg_data_loss / (avg_consist_loss + 1e-8)
             else:
-                avg_data_loss = 0.9 * avg_data_loss + 0.1 * data_loss.item()
-                avg_consist_loss = 0.9 * avg_consist_loss + 0.1 * consist_loss.item()
-            lambda_consist = avg_data_loss / (avg_consist_loss + 1e-8)
+                lambda_consist = fixed_lambda
             loss = data_loss + lambda_consist * consist_loss
             loss.backward()
             total_loss += loss.item()
@@ -184,14 +191,27 @@ def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=
                 p_col = np.concatenate([p_col, new_col])
 
         if it % 100 == 0:
-            print(f'Phase 2 迭代 {it}/{max_iter}, 总损失: {total_loss/num_train:.4f}, data_loss={total_data_loss/num_train:.4f}, consist_loss={total_consist_loss/num_train:.4f}')
+            train_loss = total_loss / num_train
+            train_losses.append(train_loss)
+            
+            # 测试
+            test_err, _ = test_model(model, n=n, num_test=10, op=op, equation_type=equation_type)
+            test_errors.append(test_err)
+            
+            print(f'Phase 2 迭代 {it}/{max_iter}, 总损失: {train_loss:.4f}, data_loss={total_data_loss/num_train:.4f}, consist_loss={total_consist_loss/num_train:.4f}, test_err={test_err:.6f}')
             if torch.cuda.is_available():
                 print(f'显存占用: {torch.cuda.memory_allocated()/1024**3:.2f} GB / {torch.cuda.memory_reserved()/1024**3:.2f} GB')
-        else:
-            if it % 1 == 0:
-                print(f'Phase 2 迭代 {it}/{max_iter}, 损失: {total_loss/num_train:.4f}')
 
-    return model
+    # 最终测试
+    final_test_err, _ = test_model(model, n=n, num_test=num_test, op=op, equation_type=equation_type)
+    final_train_loss = total_loss / num_train
+    
+    return model, {
+        'train_losses': train_losses,
+        'test_errors': test_errors,
+        'final_train_loss': final_train_loss,
+        'final_test_err': final_test_err
+    }
 
 def test_model(model, n=256, num_test=100, op='inv', equation_type='AX=B', generate_explanation=False):
     device = next(model.parameters()).device
