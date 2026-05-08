@@ -2,13 +2,13 @@
 NeuMatC 动态λ配置策略对比实验
 
 两阶段训练模式:
-- Phase 1: 纯监督预训练, lr=1e-4, 迭代=1000
+- Phase 1: 纯监督预训练, lr=1e-4, 迭代=500
 - Phase 2: 一致性约束微调, lr=1e-5
 
-实验配置:
-- 矩阵规模: 32×32
-- 训练样本: 100个
-- 训练迭代: 5000次
+实验配置（小型矩阵快速验证）:
+- 矩阵规模: 8×8
+- 训练样本: 50个
+- 训练迭代: 2000次
 - 优化策略: Adam
 
 对比策略:
@@ -81,7 +81,7 @@ def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_it
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    model = LowRankContinuousMapping(output_shape=(n, n), hidden_dim=64, latent_dim=20)
+    model = LowRankContinuousMapping(output_shape=(n, n), hidden_dim=32, latent_dim=10)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
 
@@ -98,11 +98,11 @@ def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_it
     test_errors = []
 
     # ========== Phase 1: 纯监督预训练 ==========
-    print(f"  Phase 1: 纯监督预训练, lr=1e-4, 迭代=1000")
+    print(f"  Phase 1: 纯监督预训练, lr=1e-4, 迭代=500")
     phase1_optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    phase1_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(phase1_optimizer, T_max=1000)
+    phase1_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(phase1_optimizer, T_max=500)
 
-    for it in range(1000):
+    for it in range(500):
         model.train()
         phase1_optimizer.zero_grad()
 
@@ -208,9 +208,9 @@ def evaluate(model, n=32, num_test=10):
 
 # ================== 主实验函数 ==================
 def run_lambda_experiment():
-    n = 32
-    num_train = 100
-    max_iter = 5000
+    n = 8  # 小型矩阵快速验证
+    num_train = 50
+    max_iter = 2000
 
     strategies = [
         {'name': 'lambda=0.1', 'type': 'fixed', 'value': 0.1},
@@ -224,7 +224,7 @@ def run_lambda_experiment():
     print("="*70)
     print("NeuMatC 动态λ配置策略对比实验")
     print("="*70)
-    print(f"矩阵规模: {n}×{n}")
+    print(f"矩阵规模: {n}×{n} (小型矩阵快速验证)")
     print(f"训练样本: {num_train}个")
     print(f"训练迭代: {max_iter}次")
     print("="*70)
@@ -268,10 +268,10 @@ def save_results(results):
         f.write("# NeuMatC 动态λ配置策略对比实验报告\n\n")
         f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("## 实验配置\n\n")
-        f.write(f"- 矩阵规模: 32×32\n")
-        f.write(f"- 训练样本: 100个\n")
-        f.write(f"- Phase 1: 纯监督预训练, lr=1e-4, 迭代=1000\n")
-        f.write(f"- Phase 2: 一致性约束微调, lr=1e-5, 迭代=5000\n\n")
+        f.write(f"- 矩阵规模: 8×8 (小型矩阵快速验证)\n")
+        f.write(f"- 训练样本: 50个\n")
+        f.write(f"- Phase 1: 纯监督预训练, lr=1e-4, 迭代=500\n")
+        f.write(f"- Phase 2: 一致性约束微调, lr=1e-5, 迭代=2000\n\n")
         
         f.write("## 实验结果\n\n")
         f.write("| λ配置策略 | 最终训练损失 | 测试真实误差 | 人工调参成本 |\n")
