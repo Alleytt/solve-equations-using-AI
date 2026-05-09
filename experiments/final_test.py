@@ -201,12 +201,17 @@ def run_full_test(n=256, num_test=50):
     print(f"测试样本数: {num_test}")
     print("="*70)
 
-    # 初始化模型（使用随机权重演示）
+    # 初始化模型并加载预训练权重
     model = LowRankContinuousMapping(output_shape=(n, n), hidden_dim=256, latent_dim=128)
     model = model.to(device)
     
-    # 注意：实际使用时应加载预训练权重
-    # model.load_state_dict(torch.load('models/neumatc_n256.pth'))
+    # 加载预训练权重
+    model_path = 'models/neumatc_n256.pth'
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        print(f"已加载预训练模型: {model_path}")
+    else:
+        print(f"警告: 未找到预训练模型 {model_path}，使用随机初始化权重")
 
     # 测试结果字典
     results = {}
