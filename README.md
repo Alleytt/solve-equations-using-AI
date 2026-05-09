@@ -29,8 +29,6 @@ solve-equations-using-AI/
 │   └── explainer/
 │       └── matrix_explainer.py              # 矩阵解释生成
 ├── experiments/
-│   ├── ablation_experiment.py               # 消融实验（5组配置）
-│   ├── five_group_comparison.py             # 五组对比实验（A/B/C/D/E）
 │   ├── lambda_comparison.py                 # 动态λ配置策略对比
 │   ├── final_test.py                        # 最终测试验证
 │   ├── adaptive_sampling_final.py           # 自适应采样完整实验
@@ -60,28 +58,6 @@ solve-equations-using-AI/
 - 优先学习模型表现差的区域
 
 ---
-
-## 实验脚本说明
-
-### 消融实验 (ablation_experiment.py)
-验证三大创新点的独立贡献：
-| 配置 | 两阶段训练 | 动态λ | 采样策略 | 监督训练 |
-|------|------------|-------|----------|----------|
-| Base | ✔️ | ❌ | 无 | ✔️ |
-| Abl-1 | ✔️ | ✔️ | 无 | ✔️ |
-| Abl-2 | ✔️ | ✔️ | 随机 | ✔️ |
-| Abl-3 | ✔️ | ✔️ | FGS | ❌ |
-| Full | ✔️ | ✔️ | FGS | ✔️ |
-
-### 五组对比实验 (five_group_comparison.py)
-验证自适应采样的效果：
-| 组别 | 方法 | 资源配置 |
-|------|------|---------|
-| A | 纯基线 | 20个初始样本 |
-| B | FGS-无监督 | 480个无监督点 |
-| C | 自适应采样 | 24个监督点 |
-| D | 随机采样 | 24个监督点 |
-| E | FGS-原规模 | 200个无监督点 |
 
 ### 动态λ对比实验 (lambda_comparison.py)
 验证动态λ的有效性：
