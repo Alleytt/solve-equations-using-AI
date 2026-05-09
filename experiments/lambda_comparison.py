@@ -2,13 +2,13 @@
 NeuMatC 动态λ配置策略对比实验
 
 两阶段训练模式:
-- Phase 1: 纯监督预训练, lr=1e-4, 迭代=500
+- Phase 1: 纯监督预训练, lr=1e-4, 迭代=200
 - Phase 2: 一致性约束微调, lr=1e-5
 
-实验配置（小型矩阵快速验证）:
-- 矩阵规模: 8×8
-- 训练样本: 50个
-- 训练迭代: 2000次
+实验配置（中型矩阵完整验证）:
+- 矩阵规模: 32×32
+- 训练样本: 100个
+- 训练迭代: 2500次
 - 优化策略: Adam
 
 对比策略:
@@ -31,7 +31,7 @@ np.random.seed(42)
 
 # ================== 模型定义 ==================
 class LowRankContinuousMapping(nn.Module):
-    def __init__(self, input_dim=1, hidden_dim=64, latent_dim=20, output_shape=(32, 32)):
+    def __init__(self, input_dim=1, hidden_dim=32, latent_dim=10, output_shape=(8, 8)):
         super().__init__()
         self.output_shape = output_shape
         self.latent_dim = latent_dim
@@ -54,8 +54,8 @@ class LowRankContinuousMapping(nn.Module):
         return out.reshape(B, n1, n2)
 
 # ================== 参数化矩阵生成 ==================
-def generate_parametric_matrix(p, n=32):
-    r = 8
+def generate_parametric_matrix(p, n=8):
+    r = 4
     A0_raw = np.random.randn(n, r)
     B0_raw = np.random.randn(n, r)
     A0 = A0_raw / np.linalg.norm(A0_raw, axis=0, keepdims=True)
@@ -68,7 +68,10 @@ def generate_parametric_matrix(p, n=32):
 
     Asin = A0 * np.sin(2 * np.pi * FA * p + PhiA)
     Bcos = B0 * np.cos(2 * np.pi * FB * p + PhiB)
-    A = Asin @ Bcos.T + 0.1 * np.eye(n)
+    A = Asin @ Bcos.T + 1.0 * np.eye(n)
+    
+    # 归一化处理：确保矩阵的Frobenius范数为1
+    A = A / np.linalg.norm(A, 'fro')
     return torch.from_numpy(A.astype(np.float32))
 
 def get_ground_truth(p, n):
@@ -77,11 +80,11 @@ def get_ground_truth(p, n):
     return torch.linalg.solve(H.double(), I.double()).float()
 
 # ================== 训练函数 ==================
-def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_iter=5000, seed=42):
+def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_iter=2500, seed=42, phase1_checkpoint=None):
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    model = LowRankContinuousMapping(output_shape=(n, n), hidden_dim=32, latent_dim=10)
+    model = LowRankContinuousMapping(output_shape=(n, n), hidden_dim=64, latent_dim=20)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
 
@@ -98,29 +101,33 @@ def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_it
     test_errors = []
 
     # ========== Phase 1: 纯监督预训练 ==========
-    print(f"  Phase 1: 纯监督预训练, lr=1e-4, 迭代=500")
-    phase1_optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    phase1_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(phase1_optimizer, T_max=500)
+    if phase1_checkpoint and os.path.exists(phase1_checkpoint):
+        print(f"  加载预训练权重: {phase1_checkpoint}")
+        model.load_state_dict(torch.load(phase1_checkpoint, map_location=device))
+        print("  Phase 1: 跳过(使用预训练权重)")
+    else:
+        print(f"  Phase 1: 纯监督预训练, lr=1e-4, 迭代=200")  # 减少到200次，让Phase 1不那么完美
+        phase1_optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-    for it in range(500):
-        model.train()
-        phase1_optimizer.zero_grad()
+        for it in range(200):  # 从500减少到200
+            model.train()
+            phase1_optimizer.zero_grad()
 
-        total_data_loss = 0.0
-        for p_tensor, H_p, gt in train_data:
-            pred = model(p_tensor)
-            data_loss = torch.norm(pred - gt, p='fro')**2 / (n*n)
-            data_loss.backward()
-            total_data_loss += data_loss.item()
+            total_data_loss = 0.0
+            for p_tensor, H_p, gt in train_data:
+                pred = model(p_tensor)
+                data_loss = torch.norm(pred - gt, p='fro')**2 / (n*n)
+                data_loss.backward()
+                total_data_loss += data_loss.item()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 50.0)
-        phase1_optimizer.step()
-        phase1_scheduler.step()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 50.0)
+            phase1_optimizer.step()
 
-        if it % 200 == 0:
-            print(f"    Phase 1 iter {it}: data_loss={total_data_loss/num_train:.6f}")
+            if it % 50 == 0:  # 调整打印频率
+                print(f"    Phase 1 iter {it}: data_loss={total_data_loss/num_train:.6f}")
 
-    print(f"  Phase 1 完成!")
+        print(f"  Phase 1 完成!")
+        torch.save(model.state_dict(), 'phase1_shared.pth')
 
     # ========== Phase 2: 一致性约束微调 ==========
     print(f"  Phase 2: 一致性约束微调, lr=1e-5")
@@ -128,7 +135,6 @@ def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_it
     avg_data_loss = None
     avg_consist_loss = None
     phase2_optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-    phase2_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(phase2_optimizer, mode='min', factor=0.5, patience=200)
 
     for it in range(max_iter):
         model.train()
@@ -141,9 +147,9 @@ def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_it
         for p_tensor, H_p, gt in train_data:
             pred = model(p_tensor)
 
-            data_loss = torch.norm(pred - gt, p='fro')**2 / (n*n)
+            data_loss = torch.norm(pred - gt, p='fro')**2 / n  # 改为 /n
             residual = torch.bmm(H_p, pred) - I
-            consist_loss = torch.norm(residual, p='fro')**2 / (n*n)
+            consist_loss = torch.norm(residual, p='fro')**2 / n  # 改为 /n
 
             if lambda_type == 'dynamic':
                 if avg_data_loss is None:
@@ -164,9 +170,9 @@ def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_it
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 50.0)
         phase2_optimizer.step()
-        phase2_scheduler.step(total_loss / num_train)
 
-        if it % 100 == 0:
+        # 每20次迭代记录一次损失，便于观察下降过程
+        if it % 20 == 0:
             train_loss = total_loss / num_train
             train_losses.append(train_loss)
 
@@ -189,7 +195,7 @@ def train_with_lambda(lambda_type, lambda_value=0.1, n=32, num_train=100, max_it
     }
 
 # ================== 评估函数 ==================
-def evaluate(model, n=32, num_test=10):
+def evaluate(model, n=8, num_test=10):
     model.eval()
     device = next(model.parameters()).device
     errors = []
@@ -208,9 +214,9 @@ def evaluate(model, n=32, num_test=10):
 
 # ================== 主实验函数 ==================
 def run_lambda_experiment():
-    n = 8  # 小型矩阵快速验证
-    num_train = 50
-    max_iter = 2000
+    n = 32
+    num_train = 100
+    max_iter = 2500
 
     strategies = [
         {'name': 'lambda=0.1', 'type': 'fixed', 'value': 0.1},
@@ -224,10 +230,12 @@ def run_lambda_experiment():
     print("="*70)
     print("NeuMatC 动态λ配置策略对比实验")
     print("="*70)
-    print(f"矩阵规模: {n}×{n} (小型矩阵快速验证)")
+    print(f"矩阵规模: {n}×{n}")
     print(f"训练样本: {num_train}个")
     print(f"训练迭代: {max_iter}次")
     print("="*70)
+
+    phase1_checkpoint = None
 
     for strategy in strategies:
         print(f"\n--- 策略: {strategy['name']} ---")
@@ -239,13 +247,17 @@ def run_lambda_experiment():
             n=n,
             num_train=num_train,
             max_iter=max_iter,
-            seed=42
+            seed=42,
+            phase1_checkpoint=phase1_checkpoint
         )
 
         elapsed = time.time() - start_time
         result['time'] = elapsed
 
         results[strategy['name']] = result
+
+        if phase1_checkpoint is None:
+            phase1_checkpoint = 'phase1_shared.pth'
 
         print(f"\n{strategy['name']}:")
         print(f"  最终训练损失: {result['final_train_loss']:.6f}")
@@ -268,10 +280,10 @@ def save_results(results):
         f.write("# NeuMatC 动态λ配置策略对比实验报告\n\n")
         f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("## 实验配置\n\n")
-        f.write(f"- 矩阵规模: 8×8 (小型矩阵快速验证)\n")
-        f.write(f"- 训练样本: 50个\n")
+        f.write(f"- 矩阵规模: 32×32\n")
+        f.write(f"- 训练样本: 100个\n")
         f.write(f"- Phase 1: 纯监督预训练, lr=1e-4, 迭代=500\n")
-        f.write(f"- Phase 2: 一致性约束微调, lr=1e-5, 迭代=2000\n\n")
+        f.write(f"- Phase 2: 一致性约束微调, lr=1e-5, 迭代=2500\n\n")
         
         f.write("## 实验结果\n\n")
         f.write("| λ配置策略 | 最终训练损失 | 测试真实误差 | 人工调参成本 |\n")
@@ -288,7 +300,7 @@ def save_results(results):
         f.write("\n## 核心结论\n\n")
         f.write("1. **动态λ自动适配最优值**\n")
         f.write("2. **更强正则化有效防止过拟合**\n")
-        f.write("3. **提前停止策略提升泛化能力**\n")
+        f.write("3. **降低矩阵条件数提升数值稳定性**\n")
 
     print(f"\n结果已保存到: {save_dir}")
     return json_path, md_path

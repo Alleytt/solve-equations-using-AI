@@ -252,11 +252,11 @@ def save_results(results, inv_speedup, axb_speedup):
     os.makedirs(save_dir, exist_ok=True)
 
     json_path = os.path.join(save_dir, f'test_results_{timestamp}.json')
-    with open(json_path, 'w') as f:
-        json.dump(results, f, indent=2)
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
 
     md_path = os.path.join(save_dir, f'test_summary_{timestamp}.md')
-    with open(md_path, 'w') as f:
+    with open(md_path, 'w', encoding='utf-8') as f:
         f.write("# NeuMatC 测试验证报告\n\n")
         f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("## 测试配置\n\n")

@@ -92,6 +92,13 @@ solve-equations-using-AI/
 | λ=10 | 固定值 |
 | 动态λ | 自适应调整 |
 
+当前脚本配置：
+- 矩阵规模：32×32
+- 训练样本：100个
+- Phase 1迭代：200次
+- Phase 2迭代：2500次
+- 结果保存目录：`results/lambda_comparison`
+
 ### 最终测试验证 (final_test.py)
 评估模型性能：
 - **inv任务**: 逆矩阵质量评估

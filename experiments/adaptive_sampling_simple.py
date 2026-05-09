@@ -37,7 +37,7 @@ def run_single_group(group_name, adaptive_sampling=False, sampling_method='adapt
     for p in p_train:
         H = generate_parametric_matrix(p, n).to(device)
         gt = torch.linalg.solve(H.double(), torch.eye(n, device=device).double()).float().unsqueeze(0)
-        train_data.append((torch.tensor([[p]], dtype=torch.float32).to(device), H.unsqueeze(0), gt))
+        train_data.append((torch.tensor([[float(p)]], dtype=torch.float32).to(device), H.unsqueeze(0), gt))
         train_p_set.add(p)
     
     selected_points = []
@@ -88,7 +88,7 @@ def run_single_group(group_name, adaptive_sampling=False, sampling_method='adapt
                 if p not in train_p_set:
                     H_new = generate_parametric_matrix(p, n).to(device)
                     gt_new = torch.linalg.solve(H_new.double(), torch.eye(n, device=device).double()).float().unsqueeze(0)
-                    train_data.append((torch.tensor([[p]], dtype=torch.float32).to(device), H_new.unsqueeze(0), gt_new))
+                    train_data.append((torch.tensor([[float(p)]], dtype=torch.float32).to(device), H_new.unsqueeze(0), gt_new))
                     train_p_set.add(p)
         
         if it % 50 == 0:
@@ -99,7 +99,7 @@ def run_single_group(group_name, adaptive_sampling=False, sampling_method='adapt
     with torch.no_grad():
         final_err = 0.0
         for p in p_test:
-            p_tensor = torch.tensor([[p]], dtype=torch.float32).to(device)
+            p_tensor = torch.tensor([[float(p)]], dtype=torch.float32).to(device)
             H = generate_parametric_matrix(p, n).to(device)
             pred = model(p_tensor)
             I = torch.eye(n).to(device)
@@ -119,6 +119,8 @@ def run_single_group(group_name, adaptive_sampling=False, sampling_method='adapt
 def main():
     print("===== 自适应采样对比实验（简化版） =====")
     
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
     results = []
     
     # A组：纯监督基线
@@ -130,13 +132,13 @@ def main():
     n = 32
     p_train_b = np.random.uniform(0, 1, 210)  # 10训练 + 200配点
     model_b = LowRankContinuousMapping(input_dim=1, hidden_dim=64, latent_dim=32,
-                                       output_shape=(n, n), activation='sin')
+                                       output_shape=(n, n), activation='sin').to(device)
     opt_b = optim.Adam(model_b.parameters(), lr=1e-4)
     train_data_b = []
     for p in p_train_b:
-        H = generate_parametric_matrix(p, n)
-        gt = torch.linalg.solve(H.double(), torch.eye(n).double()).float().unsqueeze(0)
-        train_data_b.append((torch.tensor([[p]]), H.unsqueeze(0), gt))
+        H = generate_parametric_matrix(p, n).to(device)
+        gt = torch.linalg.solve(H.double(), torch.eye(n, device=device).double()).float().unsqueeze(0)
+        train_data_b.append((torch.tensor([[float(p)]], dtype=torch.float32).to(device), H.unsqueeze(0), gt))
     
     for it in range(200):
         model_b.train()
@@ -145,7 +147,7 @@ def main():
         for p_tensor, H_p, gt in train_data_b:
             pred = model_b(p_tensor)
             data_loss = torch.norm(pred - gt, p='fro')**2
-            I = torch.eye(n).unsqueeze(0)
+            I = torch.eye(n).unsqueeze(0).to(device)
             residual = torch.bmm(H_p, pred) - I
             consist_loss = torch.norm(residual, p='fro')**2 / (n*n)
             loss = data_loss + 0.1 * consist_loss
@@ -161,9 +163,10 @@ def main():
     final_err_b = 0.0
     with torch.no_grad():
         for p in p_test:
-            pred = model_b(torch.tensor([[p]]))
-            H = generate_parametric_matrix(p, n)
-            I = torch.eye(n)
+            p_tensor = torch.tensor([[float(p)]], dtype=torch.float32).to(device)
+            pred = model_b(p_tensor)
+            H = generate_parametric_matrix(p, n).to(device)
+            I = torch.eye(n).to(device)
             err = torch.norm(H @ pred.squeeze() - I) / torch.norm(I)
             final_err_b += err.item()
     final_err_b /= 50

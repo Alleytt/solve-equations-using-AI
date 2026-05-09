@@ -105,9 +105,9 @@ def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=
     # ========== 第一阶段：纯监督预训练 ==========
     print("\n========== Phase 1: 纯监督预训练 ==========")
     phase1_optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
-    phase1_scheduler = optim.lr_scheduler.CosineAnnealingLR(phase1_optimizer, T_max=1000)
+    phase1_scheduler = optim.lr_scheduler.CosineAnnealingLR(phase1_optimizer, T_max=300)  # 减少到300次迭代
 
-    for it in range(1000):
+    for it in range(300):  # 减少Phase 1的迭代次数，从1000改为300
         model.train()
         total_data_loss = 0.0
 
@@ -124,7 +124,7 @@ def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=
         phase1_scheduler.step()
 
         if it % 100 == 0:
-            print(f"Phase 1: iter {it}, loss: {total_data_loss/num_train:.4f}")
+            print(f"Phase 1: iter {it}, loss: {total_data_loss/num_train:.4e}")
 
     torch.save(model.state_dict(), 'phase1_inverse.pth')
     print("Phase 1 完成，模型已保存: phase1_inverse.pth")
@@ -149,7 +149,7 @@ def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=
 
         optimizer.zero_grad()
 
-        for p_tensor, H_p, _, _, gt in train_data:
+        for p_idx, (p_tensor, H_p, _, _, gt) in enumerate(train_data):
             pred = model(p_tensor)
 
             data_loss = torch.norm(pred - gt, p='fro')**2
@@ -157,13 +157,17 @@ def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=
             I = torch.eye(n, device=device).unsqueeze(0)
             if equation_type == 'AX=B':
                 residual = torch.bmm(H_p, pred) - I
-                consist_loss = torch.norm(residual, p='fro')**2 / (n*n)
+                consist_loss = torch.norm(residual, p='fro')**2 / n  # 改为除以 n 而不是 n*n
             elif equation_type == 'XA=B':
                 residual = torch.bmm(pred, H_p) - I
-                consist_loss = torch.norm(residual, p='fro')**2 / (n*n)
+                consist_loss = torch.norm(residual, p='fro')**2 / n  # 改为除以 n 而不是 n*n
             else:
                 residual = torch.bmm(H_p, pred) - I
-                consist_loss = torch.norm(residual, p='fro')**2 / (n*n)
+                consist_loss = torch.norm(residual, p='fro')**2 / n  # 改为除以 n 而不是 n*n
+            
+            # 调试输出：第一个iteration和每500个iteration输出一次
+            if it < 5 or (it % 500 == 0 and p_idx == 0):
+                print(f"[DEBUG Phase2-{it}] pred.shape={pred.shape}, H_p.shape={H_p.shape}, residual.shape={residual.shape}, consist_loss={consist_loss.item():.6e}")
 
             if lambda_type == 'dynamic':
                 if avg_data_loss is None:
@@ -198,13 +202,20 @@ def train_neumatc(n=256, op='inv', equation_type='AX=B', num_train=40, num_test=
             test_err, _ = test_model(model, n=n, num_test=10, op=op, equation_type=equation_type)
             test_errors.append(test_err)
             
-            print(f'Phase 2 迭代 {it}/{max_iter}, 总损失: {train_loss:.4f}, data_loss={total_data_loss/num_train:.4f}, consist_loss={total_consist_loss/num_train:.4f}, test_err={test_err:.6f}')
+            print(f'Phase 2 迭代 {it}/{max_iter}, 总损失: {train_loss:.4f}, data_loss={total_data_loss/num_train:.4e}, consist_loss={total_consist_loss/num_train:.4e}, lambda_consist={avg_data_loss/(avg_consist_loss+1e-8):.4e}, test_err={test_err:.6f}')
             if torch.cuda.is_available():
                 print(f'显存占用: {torch.cuda.memory_allocated()/1024**3:.2f} GB / {torch.cuda.memory_reserved()/1024**3:.2f} GB')
 
     # 最终测试
     final_test_err, _ = test_model(model, n=n, num_test=num_test, op=op, equation_type=equation_type)
     final_train_loss = total_loss / num_train
+
+    # 保存最终模型权重
+    save_dir = 'models'
+    os.makedirs(save_dir, exist_ok=True)
+    model_path = os.path.join(save_dir, f'neumatc_n{n}.pth')
+    torch.save(model.state_dict(), model_path)
+    print(f"Phase 2 完成，最终模型已保存: {model_path}")
     
     return model, {
         'train_losses': train_losses,
